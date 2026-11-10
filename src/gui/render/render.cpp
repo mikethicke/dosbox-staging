@@ -14,6 +14,7 @@
 #include "private/auto_shader_switcher.h"
 #include "private/shader_manager.h"
 
+#include "autoscribe/autoscribe.h"
 #include "capture/capture.h"
 #include "config/config.h"
 #include "config/setup.h"
@@ -417,6 +418,10 @@ void RENDER_EndUpdate(const bool abort)
 	    (CAPTURE_IsCapturingImage() || CAPTURE_IsCapturingVideo())) {
 
 		handle_capture_frame();
+	}
+
+	if (!abort && DOSBOX_IsRunning() && AUTOSCRIBE_IsActive()) {
+		AUTOSCRIBE_OnFrame();
 	}
 
 	// Only deinterlace the output if the frame has changed

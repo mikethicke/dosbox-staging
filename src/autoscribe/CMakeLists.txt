@@ -1,0 +1,5 @@
+if(NOT WIN32)
+  target_sources(dosboxcommon PRIVATE autoscribe.cpp)
+else()
+  target_sources(dosboxcommon PRIVATE autoscribe_stub.cpp)
+endif()

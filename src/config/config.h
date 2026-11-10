@@ -54,6 +54,9 @@ struct CommandLineArguments {
 	std::optional<int> socket           = {};
 	std::optional<int> wait_pid         = {};
 	std::optional<std::string> log_name = {};
+
+	// Autoscribe link socket path (empty: inactive)
+	std::string autoscribe_socket = {};
 };
 
 class Config {

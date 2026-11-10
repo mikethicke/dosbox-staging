@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText:  2020-2026 The DOSBox Staging Team
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "autoscribe/autoscribe.h"
 #include "dosbox.h"
 
 #include "gui/common.h"
@@ -552,6 +553,7 @@ static void maybe_create_resource_directories()
 
 static void quit_func()
 {
+	AUTOSCRIBE_Shutdown();
 	GFX_Quit();
 #ifdef WIN32
 	restore_console_encoding();
@@ -723,6 +725,7 @@ int main(int argc, char* argv[])
 
 		GFX_InitSdl();
 		DOSBOX_InitModules();
+		AUTOSCRIBE_Init(arguments->autoscribe_socket);
 		GFX_InitAndStartGui();
 
 		// All subsystems' hotkeys need to be registered at this point

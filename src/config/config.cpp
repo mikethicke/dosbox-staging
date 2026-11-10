@@ -598,6 +598,13 @@ void Config::ParseArguments()
 	arguments.wait_pid = cmdline->FindRemoveIntArgument("wait_pid");
 	arguments.log_name = cmdline->FindRemoveStringArgument("log_name");
 
+	arguments.autoscribe_socket = cmdline->FindRemoveStringArgument("autoscribe-socket");
+	if (arguments.autoscribe_socket.empty()) {
+		if (const auto env = getenv("AUTOSCRIBE_SOCKET"); env && *env) {
+			arguments.autoscribe_socket = env;
+		}
+	}
+
 	arguments.conf = cmdline->FindRemoveVectorArgument("conf");
 	arguments.set  = cmdline->FindRemoveVectorArgument("set");
 
