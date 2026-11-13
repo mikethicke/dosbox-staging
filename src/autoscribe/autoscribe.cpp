@@ -5,6 +5,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -20,6 +21,9 @@
 
 #include <SDL3/SDL.h>
 
+#include "audio/mixer.h"
+#include "config/config.h"
+#include "config/setup.h"
 #include "dosbox.h"
 #include "gui/render/render.h"
 #include "hardware/input/keyboard.h"
@@ -57,6 +61,7 @@ enum class Msg : uint16_t {
 	MouseButton = 0x0106,
 	Pause       = 0x0107,
 	Shutdown    = 0x0108,
+	SetConfig   = 0x0109,
 };
 
 constexpr uint16_t FlagAbsolute = 0x0001;
@@ -315,6 +320,59 @@ bool payload_as(const std::vector<uint8_t>& rx, const size_t offset,
 	return true;
 }
 
+// Applies a setting while the game runs. The payload is three UTF-8 lines:
+// section, setting, value. "mixer" / "master" is the master volume in
+// percent, which has no config setting; everything else is a config
+// setting that DOSBox allows to change at any time.
+void set_config(const std::string& payload)
+{
+	const auto first  = payload.find('\n');
+	const auto second = first == std::string::npos
+	                          ? std::string::npos
+	                          : payload.find('\n', first + 1);
+	if (second == std::string::npos) {
+		LOG_WARNING("AUTOSCRIBE: Malformed SET_CONFIG message");
+		return;
+	}
+	const auto section_name  = payload.substr(0, first);
+	const auto property_name = payload.substr(first + 1, second - first - 1);
+	const auto value         = payload.substr(second + 1);
+
+	if (section_name == "mixer" && property_name == "master") {
+		char* end          = nullptr;
+		const auto percent = std::strtof(value.c_str(), &end);
+		if (end == value.c_str() || percent < 0.0f || percent > 100.0f) {
+			LOG_WARNING("AUTOSCRIBE: Invalid master volume '%s'",
+			            value.c_str());
+			return;
+		}
+		const auto gain = percent / 100.0f;
+		MIXER_SetMasterVolume({gain, gain});
+		return;
+	}
+
+	auto* section = dynamic_cast<SectionProp*>(control->GetSection(section_name));
+	auto* property = section ? section->GetProperty(property_name) : nullptr;
+	if (!property) {
+		LOG_WARNING("AUTOSCRIBE: No setting '%s' in [%s]",
+		            property_name.c_str(),
+		            section_name.c_str());
+		return;
+	}
+	if (property->GetChange() != Property::Changeable::Always) {
+		LOG_WARNING("AUTOSCRIBE: Setting '%s' cannot change while a program runs",
+		            property_name.c_str());
+		return;
+	}
+	if (value.empty() || value.find('\n') != std::string::npos) {
+		LOG_WARNING("AUTOSCRIBE: Invalid value for '%s'", property_name.c_str());
+		return;
+	}
+	section->HandleInputLine(property_name + "=" + value);
+	section->ExecuteUpdate(*property);
+	LOG_MSG("AUTOSCRIBE: Set %s = %s", property_name.c_str(), value.c_str());
+}
+
 void handle_message(const Header& h, const size_t payload_offset)
 {
 	const auto& rx = state.rx;
@@ -415,6 +473,12 @@ void handle_message(const Header& h, const size_t payload_offset)
 	case Msg::Pause:
 		// TODO: hook the pause state machine.
 		break;
+	case Msg::SetConfig: {
+		const std::string payload(rx.begin() + static_cast<std::ptrdiff_t>(payload_offset),
+		                          rx.begin() + static_cast<std::ptrdiff_t>(payload_offset + h.length));
+		set_config(payload);
+		break;
+	}
 	case Msg::Shutdown: {
 		SDL_Event e = {};
 		e.type      = SDL_EVENT_QUIT;
