@@ -24,6 +24,8 @@
 #include "gui/render/render.h"
 #include "hardware/input/keyboard.h"
 #include "hardware/input/mouse.h"
+#include "hardware/input/private/mouse_config.h"
+#include "hardware/input/private/mouse_interfaces.h"
 #include "hardware/memory.h"
 #include "hardware/timer.h"
 #include "hardware/video/vga.h"
@@ -373,10 +375,23 @@ void handle_message(const Header& h, const size_t payload_offset)
 		int16_t dx = 0, dy = 0;
 		std::memcpy(&dx, rx.data() + payload_offset, 2);
 		std::memcpy(&dy, rx.data() + payload_offset + 2, 2);
-		MOUSE_EventMoved(static_cast<float>(dx),
-		                 static_cast<float>(dy),
-		                 0.0f,
-		                 0.0f);
+		// Feed the mouse interfaces directly. MOUSE_EventMoved() drops
+		// motion unless the emulator's own window is focused and has
+		// captured the pointer, which never happens when a shell embeds
+		// the frames and the emulator runs without a window.
+		// For the same reason the DOS driver believes the pointer is
+		// uncaptured and expects absolute positions; tell it the motion
+		// is relative. Mouse state updates reset this, so set it on
+		// every message.
+		MOUSEDOS_NotifyInputType(true, true);
+		const float x_rel = static_cast<float>(dx) * mouse_config.sensitivity_coeff_x;
+		const float y_rel = static_cast<float>(dy) * mouse_config.sensitivity_coeff_y;
+		for (const auto interface_id : AllMouseInterfaceIds) {
+			auto& interface = MouseInterface::GetInstance(interface_id);
+			if (interface.IsUsingHostPointer()) {
+				interface.NotifyMoved(x_rel, y_rel, 0.0f, 0.0f);
+			}
+		}
 		break;
 	}
 	case Msg::MouseButton: {
@@ -386,7 +401,14 @@ void handle_message(const Header& h, const size_t payload_offset)
 		const auto button  = rx[payload_offset];
 		const bool pressed = rx[payload_offset + 1] != 0;
 		if (button <= static_cast<uint8_t>(MouseButtonId::Extra2)) {
-			MOUSE_EventButton(static_cast<MouseButtonId>(button), pressed);
+			// As for motion: bypass the window-capture gating.
+			for (const auto interface_id : AllMouseInterfaceIds) {
+				auto& interface = MouseInterface::GetInstance(interface_id);
+				if (interface.IsUsingHostPointer()) {
+					interface.NotifyButton(static_cast<MouseButtonId>(button),
+					                       pressed);
+				}
+			}
 		}
 		break;
 	}
@@ -598,7 +620,13 @@ void AUTOSCRIBE_Init(const std::string& socket_path)
 
 	// Listening socket
 	unlink(socket_path.c_str());
-	state.listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	// SOCK_NONBLOCK and SOCK_CLOEXEC are Linux-only; set the flags with
+	// fcntl so this also builds on macOS.
+	state.listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (state.listen_fd >= 0) {
+		fcntl(state.listen_fd, F_SETFL, fcntl(state.listen_fd, F_GETFL, 0) | O_NONBLOCK);
+		fcntl(state.listen_fd, F_SETFD, fcntl(state.listen_fd, F_GETFD, 0) | FD_CLOEXEC);
+	}
 	sockaddr_un addr = {};
 	addr.sun_family  = AF_UNIX;
 	if (socket_path.size() >= sizeof(addr.sun_path)) {
