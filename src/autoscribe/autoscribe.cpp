@@ -44,7 +44,7 @@
 
 namespace {
 
-constexpr uint16_t ProtocolVersion = 1;
+constexpr uint16_t ProtocolVersion = 2;
 
 enum class Msg : uint16_t {
 	Hello        = 0x0001,
@@ -64,6 +64,7 @@ enum class Msg : uint16_t {
 	Pause       = 0x0107,
 	Shutdown    = 0x0108,
 	SetConfig   = 0x0109,
+	MemWrite    = 0x010A,
 };
 
 constexpr uint16_t FlagAbsolute = 0x0001;
@@ -114,6 +115,7 @@ constexpr size_t SlotBytes = MaxFrameWidth * MaxFrameHeight * 4 + MaxTextBytes;
 constexpr size_t ShmBytes  = SlotBytes * 2;
 
 constexpr uint32_t MaxMemRead = 1 << 20; // 1 MiB per request
+constexpr uint32_t MaxMemWrite = 4096;   // bytes per request
 
 struct Watch {
 	uint32_t address = 0;
@@ -468,6 +470,27 @@ void handle_message(const Header& h, const size_t payload_offset)
 					interface.NotifyButton(static_cast<MouseButtonId>(button),
 					                       pressed);
 				}
+			}
+		}
+		break;
+	}
+	case Msg::MemWrite: {
+		// `u32 address, u32 length`, then the bytes. Writes past the end
+		// of memory are dropped.
+		constexpr size_t Head = 8;
+		if (h.length < Head) {
+			return;
+		}
+		uint32_t address = 0;
+		uint32_t length  = 0;
+		std::memcpy(&address, rx.data() + payload_offset, 4);
+		std::memcpy(&length, rx.data() + payload_offset + 4, 4);
+		length = std::min({length, MaxMemWrite,
+		                   static_cast<uint32_t>(h.length - Head)});
+		const auto total = memory_bytes();
+		for (uint32_t i = 0; i < length; ++i) {
+			if (const auto a = address + i; a < total) {
+				mem_writeb(a, rx[payload_offset + Head + i]);
 			}
 		}
 		break;
