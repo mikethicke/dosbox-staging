@@ -44,7 +44,7 @@
 
 namespace {
 
-constexpr uint16_t ProtocolVersion = 0;
+constexpr uint16_t ProtocolVersion = 1;
 
 enum class Msg : uint16_t {
 	Hello        = 0x0001,
@@ -52,6 +52,8 @@ enum class Msg : uint16_t {
 	MemData      = 0x0003,
 	MachineState = 0x0004,
 	Goodbye      = 0x0005,
+	FileClosed   = 0x0006,
+	FileOpened   = 0x0007,
 
 	MemRead     = 0x0101,
 	MemWatch    = 0x0102,
@@ -736,6 +738,84 @@ void AUTOSCRIBE_Shutdown()
 	}
 	shm_unlink(state.shm_name.c_str());
 	state.active = false;
+}
+
+// ---------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct FileUse {
+	uint32_t read    = 0;
+	uint32_t written = 0;
+};
+
+// Bytes read and written through each open DOS file handle.
+std::unordered_map<uint32_t, FileUse> file_use = {};
+
+#pragma pack(push, 1)
+struct FileClosedPayload {
+	uint32_t bytes_read;
+	uint32_t bytes_written;
+	uint32_t size;
+	uint8_t drive; // 0 is A:
+	uint8_t pad[3];
+	// The file's DOS path on that drive follows, not terminated.
+};
+#pragma pack(pop)
+
+} // namespace
+
+void AUTOSCRIBE_OnFileOpen(const uint8_t drive, const char* name)
+{
+	if (!state.active || state.client_fd < 0 || !name) {
+		return;
+	}
+	// `u8 drive, u8 pad[3]`, then the file's DOS path on that drive.
+	const std::string path = name;
+	std::vector<uint8_t> message(4 + path.size());
+	message[0] = drive;
+	std::memcpy(message.data() + 4, path.data(), path.size());
+	send_message(Msg::FileOpened,
+	             message.data(),
+	             static_cast<uint32_t>(message.size()));
+}
+
+void AUTOSCRIBE_OnFileRead(const uint32_t handle, const uint32_t bytes)
+{
+	if (state.active && bytes > 0) {
+		file_use[handle].read += bytes;
+	}
+}
+
+void AUTOSCRIBE_OnFileWrite(const uint32_t handle, const uint32_t bytes)
+{
+	if (state.active && bytes > 0) {
+		file_use[handle].written += bytes;
+	}
+}
+
+void AUTOSCRIBE_OnFileClose(const uint32_t handle, const uint8_t drive,
+                            const char* name, const uint32_t size)
+{
+	const auto it = file_use.find(handle);
+	if (it == file_use.end()) {
+		return;
+	}
+	const auto use = it->second;
+	file_use.erase(it);
+	if (!state.active || state.client_fd < 0 || !name) {
+		return;
+	}
+	const std::string path = name;
+	std::vector<uint8_t> message(sizeof(FileClosedPayload) + path.size());
+	const FileClosedPayload p = {use.read, use.written, size, drive, {}};
+	std::memcpy(message.data(), &p, sizeof(p));
+	std::memcpy(message.data() + sizeof(p), path.data(), path.size());
+	send_message(Msg::FileClosed,
+	             message.data(),
+	             static_cast<uint32_t>(message.size()));
 }
 
 void AUTOSCRIBE_OnFrame()

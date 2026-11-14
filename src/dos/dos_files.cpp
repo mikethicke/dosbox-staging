@@ -4,6 +4,8 @@
 
 #include "dos.h"
 
+#include "autoscribe/autoscribe.h"
+
 #include <array>
 #include <cctype>
 #include <climits>
@@ -663,6 +665,9 @@ bool DOS_ReadFile(uint16_t entry,uint8_t * data,uint16_t * amount,bool fcb) {
 
 	bool ret=Files[handle]->Read(data,&toread);
 	*amount=toread;
+	if (ret) {
+		AUTOSCRIBE_OnFileRead(handle, toread);
+	}
 	return ret;
 }
 
@@ -703,6 +708,7 @@ bool DOS_WriteFile(uint16_t entry,uint8_t * data,uint16_t * amount,bool fcb) {
 		// are set on file open and only get changed by a call to DOS_SetFileDate()
 		// This matches the behavior as tested on MS-DOS 6.22
 		Files[handle]->flush_time_on_close = FlushTimeOnClose::CurrentTime;
+		AUTOSCRIBE_OnFileWrite(handle, towrite);
 	}
 	return ret;
 }
@@ -734,6 +740,22 @@ bool DOS_CloseFile(uint16_t entry, bool fcb, uint8_t * refcnt) {
 		DOS_SetError(DOSERR_INVALID_HANDLE);
 		return false;
 	};
+	// Tell the Autoscribe link what the program did with a file on a
+	// drive; devices (the console, the printer) are not files.
+	constexpr uint16_t IsDevice = 0x8000;
+	if (AUTOSCRIBE_IsActive() && !(Files[handle]->GetInformation() & IsDevice)) {
+		// The size is where the end is; the position is put back because
+		// a duplicated handle may go on using the file.
+		uint32_t pos  = 0;
+		uint32_t size = 0;
+		Files[handle]->Seek(&pos, DOS_SEEK_CUR);
+		Files[handle]->Seek(&size, DOS_SEEK_END);
+		Files[handle]->Seek(&pos, DOS_SEEK_SET);
+		AUTOSCRIBE_OnFileClose(handle,
+		                       Files[handle]->GetDrive(),
+		                       Files[handle]->GetName(),
+		                       size);
+	}
 	Files[handle]->Close();
 
 	if (!fcb) {
@@ -815,6 +837,7 @@ bool DOS_CreateFile(const char* name, FatAttributeFlags attributes,
 		Files[handle]->SetDrive(drive);
 		Files[handle]->AddRef();
 		if (!fcb) psp.SetFileHandle(*entry,handle);
+		AUTOSCRIBE_OnFileOpen(drive, fullname);
 		return true;
 	} else {
 		if (!PathExists(name)) DOS_SetError(DOSERR_PATH_NOT_FOUND);
@@ -888,6 +911,9 @@ bool DOS_OpenFile(const char* name, uint8_t flags, uint16_t* entry, bool fcb)
 	if (Files[handle]) {
 		Files[handle]->AddRef();
 		if (!fcb) psp.SetFileHandle(*entry,handle);
+		if (!device) {
+			AUTOSCRIBE_OnFileOpen(drive, fullname);
+		}
 		return true;
 	} else {
 		//Test if file exists, but opened in read-write mode (and writeprotected)
