@@ -23,9 +23,9 @@ void AUTOSCRIBE_OnFrame();
 // tell a saved game being written from one being loaded. Opening a file is
 // reported at once, since a game may hold a save open long after it has
 // loaded it. Reads and writes are counted against the file's handle; closing
-// it reports the totals with the file's size and name, when there was
-// anything to report.
-void AUTOSCRIBE_OnFileOpen(uint8_t drive, const char* name);
+// it reports the totals with the file's size and name, even when nothing was
+// read or written, so every file reported open is reported closed.
+void AUTOSCRIBE_OnFileOpen(uint32_t handle, uint8_t drive, const char* name);
 void AUTOSCRIBE_OnFileRead(uint32_t handle, uint32_t bytes);
 void AUTOSCRIBE_OnFileWrite(uint32_t handle, uint32_t bytes);
 void AUTOSCRIBE_OnFileClose(uint32_t handle, uint8_t drive, const char* name,

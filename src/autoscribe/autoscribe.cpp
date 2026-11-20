@@ -790,11 +790,15 @@ struct FileClosedPayload {
 
 } // namespace
 
-void AUTOSCRIBE_OnFileOpen(const uint8_t drive, const char* name)
+void AUTOSCRIBE_OnFileOpen(const uint32_t handle, const uint8_t drive,
+                           const char* name)
 {
 	if (!state.active || state.client_fd < 0 || !name) {
 		return;
 	}
+	// Tracked from the open, so its close is reported even if the program
+	// neither reads nor writes it.
+	file_use[handle] = {};
 	// `u8 drive, u8 pad[3]`, then the file's DOS path on that drive.
 	const std::string path = name;
 	std::vector<uint8_t> message(4 + path.size());

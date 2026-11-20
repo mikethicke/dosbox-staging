@@ -837,7 +837,7 @@ bool DOS_CreateFile(const char* name, FatAttributeFlags attributes,
 		Files[handle]->SetDrive(drive);
 		Files[handle]->AddRef();
 		if (!fcb) psp.SetFileHandle(*entry,handle);
-		AUTOSCRIBE_OnFileOpen(drive, fullname);
+		AUTOSCRIBE_OnFileOpen(handle, drive, fullname);
 		return true;
 	} else {
 		if (!PathExists(name)) DOS_SetError(DOSERR_PATH_NOT_FOUND);
@@ -912,7 +912,7 @@ bool DOS_OpenFile(const char* name, uint8_t flags, uint16_t* entry, bool fcb)
 		Files[handle]->AddRef();
 		if (!fcb) psp.SetFileHandle(*entry,handle);
 		if (!device) {
-			AUTOSCRIBE_OnFileOpen(drive, fullname);
+			AUTOSCRIBE_OnFileOpen(handle, drive, fullname);
 		}
 		return true;
 	} else {
